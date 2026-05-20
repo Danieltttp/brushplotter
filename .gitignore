@@ -1,0 +1,30 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# Entornos virtuales
+.venv/
+venv/
+env/
+
+# Estado de sesiones (no versionar)
+session_state.json
+*.session.json
+
+# Editor
+.vscode/
+.idea/
+*.swp
+.DS_Store
+
+# Distribución
+dist/
+build/
+*.zip
