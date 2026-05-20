@@ -28,10 +28,52 @@ from .stroke_model import (
     PaintingSession,
     Stroke,
 )
+from .units import mm_to_inches, cm_to_inches
 
 
 BEZIER_SAMPLES = 20
 MAX_SEGMENT_LEN_SVG_RATIO = 0.005  # 0.5% del ancho del SVG por segmento
+
+
+# Conversión de unidades SVG a pulgadas (96 DPI estándar)
+SVG_USER_UNITS_PER_INCH = 96.0
+
+
+def _parse_svg_dimension(value: str) -> float:
+    """Parsea una dimensión SVG (con o sin unidades) a pulgadas.
+
+    Acepta: '210mm', '8.27in', '297pt', '1024px', '595' (sin unidad → px).
+    Devuelve 0 si no se puede parsear.
+    """
+    if not value:
+        return 0.0
+    value = value.strip().lower()
+    # Separar número y unidad
+    import re
+    match = re.match(r"^([0-9.+\-eE]+)\s*([a-z%]*)$", value)
+    if not match:
+        return 0.0
+    try:
+        num = float(match.group(1))
+    except ValueError:
+        return 0.0
+    unit = match.group(2)
+
+    if unit == "mm":
+        return mm_to_inches(num)
+    if unit == "cm":
+        return cm_to_inches(num)
+    if unit == "in":
+        return num
+    if unit == "pt":
+        return num / 72.0  # 72 pt = 1 in
+    if unit == "pc":
+        return num / 6.0   # 6 pc = 1 in
+    if unit in ("", "px"):
+        return num / SVG_USER_UNITS_PER_INCH
+    if unit == "%":
+        return 0.0  # No se puede resolver sin contexto
+    return num / SVG_USER_UNITS_PER_INCH  # fallback px
 
 
 def flatten_path(path, samples: int = BEZIER_SAMPLES) -> list[tuple[float, float]]:
@@ -125,6 +167,12 @@ def load_svg(
         canvas=canvas or CanvasGeometry(),
     )
 
+    # Extraer dimensiones nativas del documento SVG (atributos width/height)
+    native_w = _parse_svg_dimension(svg_attr.get("width", ""))
+    native_h = _parse_svg_dimension(svg_attr.get("height", ""))
+    session.svg_native_width_inches = native_w
+    session.svg_native_height_inches = native_h
+
     # Bounding box
     min_x, min_y = float("inf"), float("inf")
     max_x, max_y = float("-inf"), float("-inf")
@@ -193,6 +241,13 @@ def load_svg(
     session.svg_min_y = min_y
     session.svg_max_x = max_x
     session.svg_max_y = max_y
+
+    # Si el SVG no declaró width/height nativos, usamos las del bounding
+    # box convertido desde unidades SVG (asumiendo 96 DPI).
+    if session.svg_native_width_inches <= 0:
+        session.svg_native_width_inches = (max_x - min_x) / SVG_USER_UNITS_PER_INCH
+    if session.svg_native_height_inches <= 0:
+        session.svg_native_height_inches = (max_y - min_y) / SVG_USER_UNITS_PER_INCH
 
     # Subdivisión post-bounding-box: usamos un ratio del ancho del SVG
     # para que segmentos muy largos se troceen sin depender de escala.

@@ -20,6 +20,7 @@ from PySide6.QtWidgets import (
     QComboBox,
     QDoubleSpinBox,
     QFileDialog,
+    QFrame,
     QHBoxLayout,
     QLabel,
     QMainWindow,
@@ -39,7 +40,6 @@ from ..core.stroke_model import (
 )
 from ..core.svg_loader import load_svg
 from ..hardware.controller import PlotterController
-from ..hardware.plotter_models import DEFAULT_MODEL_KEY, PLOTTER_MODELS, get_model
 from ..hardware.simulator import SimulatedController
 from ..workers.paint_worker import DipPattern, PaintWorker
 from .canvas_view import CanvasView
@@ -111,19 +111,6 @@ class MainWindow(QMainWindow):
 
         toolbar.addSeparator()
 
-        # Selector de modelo de plotter
-        toolbar.addWidget(QLabel(" Plotter: "))
-        self.plotter_combo = QComboBox()
-        for key, model in PLOTTER_MODELS.items():
-            self.plotter_combo.addItem(model.name, userData=key)
-        idx = self.plotter_combo.findData(DEFAULT_MODEL_KEY)
-        if idx >= 0:
-            self.plotter_combo.setCurrentIndex(idx)
-        self.plotter_combo.currentIndexChanged.connect(self.on_plotter_model_changed)
-        toolbar.addWidget(self.plotter_combo)
-
-        toolbar.addSeparator()
-
         self.action_start = QAction("▶ Iniciar", self)
         self.action_start.triggered.connect(self.on_start)
         self.action_start.setEnabled(False)
@@ -166,43 +153,76 @@ class MainWindow(QMainWindow):
 
     def _build_left_panel(self) -> QWidget:
         panel = QWidget()
-        panel.setFixedWidth(220)
-        layout = QVBoxLayout(panel)
-        layout.setContentsMargins(12, 12, 12, 12)
-        layout.setSpacing(10)
+        panel.setFixedWidth(260)
+        outer = QVBoxLayout(panel)
+        outer.setContentsMargins(0, 0, 0, 0)
+        outer.setSpacing(0)
 
-        layout.addWidget(self._section_label("MATERIAL"))
+        from PySide6.QtWidgets import QScrollArea, QTabWidget
+        from .output_config_panel import OutputConfigPanel
+
+        tabs = QTabWidget()
+        tabs.setDocumentMode(True)
+
+        # ─── Pestaña SALIDA ───
+        output_tab = QWidget()
+        output_scroll = QScrollArea()
+        output_scroll.setWidgetResizable(True)
+        output_scroll.setFrameShape(QFrame.Shape.NoFrame)
+        output_layout = QVBoxLayout(output_tab)
+        output_layout.setContentsMargins(12, 12, 12, 12)
+        output_layout.setSpacing(8)
+
+        self.output_panel = OutputConfigPanel()
+        self.output_panel.layout_changed.connect(self.on_layout_changed)
+        output_layout.addWidget(self.output_panel)
+        output_layout.addStretch()
+
+        output_scroll.setWidget(output_tab)
+        tabs.addTab(output_scroll, "Salida")
+
+        # ─── Pestaña MATERIAL + TINTEROS ───
+        material_tab = QWidget()
+        material_layout = QVBoxLayout(material_tab)
+        material_layout.setContentsMargins(12, 12, 12, 12)
+        material_layout.setSpacing(10)
+
+        material_layout.addWidget(self._section_label("MATERIAL"))
         self.material_combo = QComboBox()
         for key, profile in DEFAULT_PROFILES.items():
             self.material_combo.addItem(profile.name, userData=key)
         self.material_combo.currentIndexChanged.connect(self.on_material_changed)
-        layout.addWidget(self.material_combo)
+        material_layout.addWidget(self.material_combo)
 
-        layout.addWidget(self._section_label("RECARGA CADA"))
+        material_layout.addWidget(self._section_label("RECARGA CADA"))
         recharge_row = QHBoxLayout()
         self.recharge_spin = QDoubleSpinBox()
-        self.recharge_spin.setRange(0.5, 20.0)
+        self.recharge_spin.setRange(0.5, 50.0)
         self.recharge_spin.setSingleStep(0.5)
-        self.recharge_spin.setSuffix(" pulg.")
-        self.recharge_spin.setValue(5.0)
+        self.recharge_spin.setSuffix(" cm")
+        self.recharge_spin.setValue(12.7)  # 5 pulgadas
         recharge_row.addWidget(self.recharge_spin)
-        layout.addLayout(recharge_row)
+        material_layout.addLayout(recharge_row)
 
-        layout.addWidget(self._section_label("VELOCIDAD"))
+        material_layout.addWidget(self._section_label("VELOCIDAD"))
         self.speed_slider = QSlider(Qt.Orientation.Horizontal)
         self.speed_slider.setRange(1, 20)
         self.speed_slider.setValue(5)
         self.speed_slider.valueChanged.connect(self._update_speed_label)
-        layout.addWidget(self.speed_slider)
+        material_layout.addWidget(self.speed_slider)
         self.speed_label = QLabel("Lenta · 5%")
         self.speed_label.setStyleSheet("font-size: 11px; color: #888;")
-        layout.addWidget(self.speed_label)
+        material_layout.addWidget(self.speed_label)
 
         # Panel de tinteros
         self.inkwell_panel = InkwellPanel()
         self.inkwell_panel.edit_requested.connect(self.on_edit_inkwell)
-        layout.addWidget(self.inkwell_panel)
+        material_layout.addWidget(self.inkwell_panel)
+        material_layout.addStretch()
 
+        tabs.addTab(material_tab, "Material y tinteros")
+
+        outer.addWidget(tabs)
         return panel
 
     def _build_right_panel(self) -> QWidget:
@@ -297,18 +317,16 @@ class MainWindow(QMainWindow):
 
         self._session = session
 
-        # Aplicar plotter actual a la sesión recién cargada
-        model_key = self.plotter_combo.currentData() or DEFAULT_MODEL_KEY
-        model = get_model(model_key)
-        session.canvas.plotter_max_x = model.max_x_inches
-        session.canvas.plotter_max_y = model.max_y_inches
+        # Conectar el panel de salida (calcula layout y aplica al session)
+        self.output_panel.set_session(session)
 
         self.canvas_view.load_session(session)
         self.inkwell_panel.set_session(session)
 
-        # Dimensiones físicas en cm (más legible que mm para el lienzo entero)
-        width_cm = (session.canvas.drawing_width * 25.4) / 10
-        height_cm = (session.physical_height * 25.4) / 10
+        # Dimensiones físicas en cm
+        from ..core.units import inches_to_cm
+        width_cm = inches_to_cm(session.canvas.drawing_width)
+        height_cm = inches_to_cm(session.physical_height)
         self.strokes_label.setText(
             f"{len(session.strokes)} trazos · {len(session.colors)} colores\n"
             f"Salida: {width_cm:.1f} × {height_cm:.1f} cm"
@@ -369,6 +387,18 @@ class MainWindow(QMainWindow):
             )
             return
 
+        # Validación 0: ¿el layout cabe en la cama?
+        layout = self.output_panel.get_current_layout()
+        if layout is not None and not layout.fits:
+            QMessageBox.warning(
+                self,
+                "El dibujo no cabe en la cama",
+                f"{layout.message_short}\n\n"
+                "Reduce la escala o cambia la orientación/tamaño de la cama "
+                "antes de iniciar.",
+            )
+            return
+
         if unassigned > 0:
             ret = QMessageBox.question(
                 self,
@@ -394,10 +424,12 @@ class MainWindow(QMainWindow):
             return
 
         # Aplicar parámetros del UI a la sesión
+        from ..core.units import cm_to_inches
         material_key = self.material_combo.currentData()
         self._session.material_profile = DEFAULT_PROFILES[material_key]
+        # El spinner está en cm — convertir a pulgadas
         self._session.material_profile.max_draw_distance_inches = (
-            self.recharge_spin.value()
+            cm_to_inches(self.recharge_spin.value())
         )
         self._session.material_profile.speed_pendown = self.speed_slider.value()
 
@@ -522,22 +554,28 @@ class MainWindow(QMainWindow):
     def on_material_changed(self):
         key = self.material_combo.currentData()
         if key and key in DEFAULT_PROFILES:
+            from ..core.units import inches_to_cm
             profile = DEFAULT_PROFILES[key]
-            self.recharge_spin.setValue(profile.max_draw_distance_inches)
+            self.recharge_spin.setValue(inches_to_cm(profile.max_draw_distance_inches))
             self.speed_slider.setValue(profile.speed_pendown)
 
     @Slot()
-    def on_plotter_model_changed(self):
-        """Actualiza los límites de la cama según el plotter elegido."""
-        key = self.plotter_combo.currentData()
-        if not key:
-            return
-        model = get_model(key)
+    def on_layout_changed(self):
+        """Llamado por el OutputConfigPanel cada vez que cambia un parámetro.
+        Refresca el preview con el nuevo layout."""
         if self._session is not None:
-            self._session.canvas.plotter_max_x = model.max_x_inches
-            self._session.canvas.plotter_max_y = model.max_y_inches
             self.canvas_view.load_session(self._session)
-            self._append_log(f"Plotter: {model.name}")
+            # Actualizar la etiqueta de tamaño de salida en el panel derecho
+            from ..core.units import inches_to_cm
+            width_cm = inches_to_cm(self._session.canvas.drawing_width)
+            height_cm = inches_to_cm(
+                (self._session.svg_max_y - self._session.svg_min_y) * self._session.scale
+            )
+            self.strokes_label.setText(
+                f"{len(self._session.strokes)} trazos · "
+                f"{len(self._session.colors)} colores\n"
+                f"Salida: {width_cm:.1f} × {height_cm:.1f} cm"
+            )
 
     # ----------------------------------------------------------
     # Helpers

@@ -9,17 +9,16 @@ from dataclasses import dataclass, field
 from enum import Enum
 from typing import Optional
 
+from .units import (
+    INCH_TO_MM,
+    cm_to_inches,
+    inches_to_cm,
+    inches_to_mm,
+    mm_to_inches,
+)
 
-# Conversión interna: la GUI muestra mm, el plotter usa pulgadas.
-MM_PER_INCH = 25.4
 
-
-def mm_to_inches(mm: float) -> float:
-    return mm / MM_PER_INCH
-
-
-def inches_to_mm(inches: float) -> float:
-    return inches * MM_PER_INCH
+MM_PER_INCH = INCH_TO_MM
 
 
 class StrokeStatus(Enum):
@@ -132,12 +131,18 @@ class CanvasGeometry:
 
     Todo en pulgadas (unidades nativas del plotter).
     Defaults para NextDraw 2234 (A1, 34.02 x 23.39 pulgadas).
+
+    Nuevo en v0.0.5:
+    - scale_factor: multiplicador (1.0 = tamaño original del SVG)
+    - centered: si True, ignora start_x/y y centra automáticamente
     """
     start_x: float = 3.0
     start_y: float = 2.0
     drawing_width: float = 8.0  # Alto se deriva del aspect ratio del SVG
     plotter_max_x: float = 34.02
     plotter_max_y: float = 23.39
+    scale_factor: float = 1.0
+    centered: bool = True
 
 
 @dataclass
@@ -160,6 +165,12 @@ class PaintingSession:
     svg_min_y: float = 0.0
     svg_max_x: float = 0.0
     svg_max_y: float = 0.0
+
+    # Dimensiones nativas del SVG en pulgadas (atributos width/height del
+    # documento, convertidos). Si el SVG no las declara, se usan las del
+    # bounding box.
+    svg_native_width_inches: float = 0.0
+    svg_native_height_inches: float = 0.0
 
     # Progreso
     current_stroke_index: int = 0
