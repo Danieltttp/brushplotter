@@ -80,15 +80,79 @@ def test_flatten_handles_bezier():
 # Modelo PaintingSession
 # ---------------------------------------------------------------
 def test_session_scale_and_projection():
+    """La proyección usa el viewBox del SVG + escala del usuario.
+
+    Nueva semántica (v0.0.5+): scale = (native_inches / viewbox_width)
+    * scale_factor. El origen es (0,0) del viewBox, no del bounding
+    box de los trazos.
+    """
+    s = PaintingSession(svg_file_path="dummy.svg")
+    # ViewBox de 100×50 unidades; nativo: 10 pulgadas de ancho.
+    # Por tanto, 1 unidad SVG = 0.1 pulgadas físicas a escala 100%.
+    s.svg_min_x, s.svg_max_x = 0, 100
+    s.svg_min_y, s.svg_max_y = 0, 50
+    s.svg_native_width_inches = 10.0
+    s.svg_native_height_inches = 5.0
+    s.canvas = CanvasGeometry(
+        start_x=1.0, start_y=2.0,
+        drawing_width=10.0, scale_factor=1.0,
+    )
+    assert s.scale == pytest.approx(0.1)
+    assert s.physical_height == pytest.approx(5.0)
+    assert s.physical_width == pytest.approx(10.0)
+
+    # Proyección de (50, 25) -> (1.0 + 50*0.1, 2.0 + 25*0.1)
+    p = s.svg_to_physical(50, 25)
+    assert p.x == pytest.approx(6.0)
+    assert p.y == pytest.approx(4.5)
+
+
+def test_session_respects_full_canvas_not_bounding_box():
+    """Si los trazos están en un sub-área del viewBox, la proyección
+    debe respetar la posición real dentro del viewBox, no encajarlos
+    en el origen."""
+    s = PaintingSession(svg_file_path="dummy.svg")
+    # ViewBox A4 entero: 210×297 (en mm = unidades SVG)
+    s.svg_min_x, s.svg_max_x = 0, 210
+    s.svg_min_y, s.svg_max_y = 0, 297
+    # SVG nativo en pulgadas
+    s.svg_native_width_inches = 210 / 25.4   # 8.27"
+    s.svg_native_height_inches = 297 / 25.4  # 11.69"
+    s.canvas = CanvasGeometry(
+        start_x=0.0, start_y=0.0,
+        drawing_width=8.27, scale_factor=1.0,
+    )
+    # Un punto en el centro del viewBox debe estar en el centro físico,
+    # incluso si los trazos reales del SVG están todos arriba a la izq.
+    p = s.svg_to_physical(105, 148.5)  # centro del A4
+    # Debería caer en 4.13" × 5.85" (centro físico)
+    assert p.x == pytest.approx(105 / 25.4, abs=0.01)
+    assert p.y == pytest.approx(148.5 / 25.4, abs=0.01)
+
+
+def test_session_rotation_90_degrees():
+    """Con rotación 90°, un punto en (max_x, 0) debe ir a (0, 0) y
+    (0, 0) debe ir a (max_x, ...) — rotación antihoraria."""
     s = PaintingSession(svg_file_path="dummy.svg")
     s.svg_min_x, s.svg_max_x = 0, 100
     s.svg_min_y, s.svg_max_y = 0, 50
-    s.canvas = CanvasGeometry(start_x=1.0, start_y=2.0, drawing_width=10.0)
-    assert s.scale == pytest.approx(0.1)
-    assert s.physical_height == pytest.approx(5.0)
-    p = s.svg_to_physical(50, 25)
-    assert p.x == pytest.approx(6.0)  # 1.0 + 50*0.1
-    assert p.y == pytest.approx(4.5)  # 2.0 + 25*0.1
+    s.svg_native_width_inches = 10.0
+    s.svg_native_height_inches = 5.0
+    s.canvas = CanvasGeometry(
+        start_x=0.0, start_y=0.0,
+        drawing_width=10.0, scale_factor=1.0,
+        rotation_degrees=90,
+    )
+    # (0, 0) en SVG con rotación 90° -> (0, svg_max_x*scale) = (0, 10")
+    p_origin = s.svg_to_physical(0, 0)
+    assert p_origin.x == pytest.approx(0.0, abs=0.01)
+    assert p_origin.y == pytest.approx(10.0, abs=0.01)
+    # (100, 0) en SVG con rotación 90° -> (0, 0) tras la fórmula
+    # rotation_degrees=90: (x, y) -> (y, svg_max_x - x)
+    # (100, 0) -> (0, 0)
+    p_topright = s.svg_to_physical(100, 0)
+    assert p_topright.x == pytest.approx(0.0, abs=0.01)
+    assert p_topright.y == pytest.approx(0.0, abs=0.01)
 
 
 def test_session_progress():

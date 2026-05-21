@@ -135,6 +135,7 @@ class CanvasGeometry:
     Nuevo en v0.0.5:
     - scale_factor: multiplicador (1.0 = tamaño original del SVG)
     - centered: si True, ignora start_x/y y centra automáticamente
+    - rotation_degrees: rotación aplicada al dibujo (0 o 90)
     """
     start_x: float = 3.0
     start_y: float = 2.0
@@ -143,6 +144,7 @@ class CanvasGeometry:
     plotter_max_y: float = 23.39
     scale_factor: float = 1.0
     centered: bool = True
+    rotation_degrees: int = 0  # 0 = apaisado (original); 90 = vertical
 
 
 @dataclass
@@ -182,15 +184,29 @@ class PaintingSession:
 
     @property
     def scale(self) -> float:
-        """Factor para convertir unidades SVG a pulgadas físicas."""
-        svg_width = self.svg_max_x - self.svg_min_x
-        if svg_width <= 0:
-            return 1.0
-        return self.canvas.drawing_width / svg_width
+        """Factor para convertir 1 unidad SVG a pulgadas físicas.
+
+        Combina dos cosas:
+        - La conversión natural del SVG (de unidades de viewBox a
+          pulgadas, derivada del atributo width nativo).
+        - El scale_factor que el usuario haya elegido en la GUI
+          (1.0 = tamaño original, 0.5 = mitad, 2.0 = doble).
+        """
+        svg_units_width = self.svg_max_x  # ancho del viewBox (asume origen 0)
+        if self.svg_native_width_inches <= 0 or svg_units_width <= 0:
+            return self.canvas.scale_factor
+        natural = self.svg_native_width_inches / svg_units_width
+        return natural * self.canvas.scale_factor
 
     @property
     def physical_height(self) -> float:
-        return (self.svg_max_y - self.svg_min_y) * self.scale
+        """Alto físico del lienzo entero del SVG (no del bounding box)."""
+        return self.svg_max_y * self.scale
+
+    @property
+    def physical_width(self) -> float:
+        """Ancho físico del lienzo entero del SVG."""
+        return self.svg_max_x * self.scale
 
     @property
     def progress_fraction(self) -> float:
@@ -215,10 +231,39 @@ class PaintingSession:
         ]
 
     def svg_to_physical(self, x: float, y: float) -> Point:
-        """Convierte un punto en unidades SVG a pulgadas físicas."""
-        phys_x = (x - self.svg_min_x) * self.scale + self.canvas.start_x
-        phys_y = (y - self.svg_min_y) * self.scale + self.canvas.start_y
-        return Point(phys_x, phys_y)
+        """Convierte un punto en unidades SVG a pulgadas físicas.
+
+        Respeta el lienzo declarado del SVG: el origen (0,0) del SVG
+        equivale a la esquina superior izquierda del lienzo, no del
+        bounding box de los trazos. Los márgenes que dejó el artista
+        en Inkscape se mantienen.
+
+        Aplica rotation_degrees si está configurada (0 o 90).
+        """
+        s = self.scale
+        # Aplicar rotación primero (en unidades SVG)
+        if self.canvas.rotation_degrees == 90:
+            # Rotación 90° antihoraria: (x, y) -> (y, svg_width - x)
+            # Esto convierte un dibujo apaisado en vertical, con la
+            # esquina superior-izquierda original yendo a inferior-izquierda.
+            new_x = y
+            new_y = self.svg_max_x - x
+            x, y = new_x, new_y
+        return Point(x * s + self.canvas.start_x, y * s + self.canvas.start_y)
+
+    @property
+    def rotated_physical_width(self) -> float:
+        """Ancho físico considerando la rotación aplicada."""
+        if self.canvas.rotation_degrees == 90:
+            return self.physical_height
+        return self.physical_width
+
+    @property
+    def rotated_physical_height(self) -> float:
+        """Alto físico considerando la rotación aplicada."""
+        if self.canvas.rotation_degrees == 90:
+            return self.physical_width
+        return self.physical_height
 
     def log_event(self, event_type: str, **kwargs):
         """Añade un evento al log con timestamp."""

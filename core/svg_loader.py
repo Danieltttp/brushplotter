@@ -173,6 +173,26 @@ def load_svg(
     session.svg_native_width_inches = native_w
     session.svg_native_height_inches = native_h
 
+    # Extraer viewBox: "min-x min-y width height"
+    # Es lo que define el sistema de coordenadas del SVG, no el bounding
+    # box de los trazos. Usarlo asegura que el lienzo declarado por el
+    # artista (con sus márgenes) se respeta.
+    viewbox = svg_attr.get("viewBox") or svg_attr.get("viewbox", "")
+    viewbox_min_x = 0.0
+    viewbox_min_y = 0.0
+    viewbox_width = 0.0
+    viewbox_height = 0.0
+    if viewbox:
+        try:
+            parts = viewbox.replace(",", " ").split()
+            if len(parts) == 4:
+                viewbox_min_x = float(parts[0])
+                viewbox_min_y = float(parts[1])
+                viewbox_width = float(parts[2])
+                viewbox_height = float(parts[3])
+        except (ValueError, IndexError):
+            pass
+
     # Bounding box
     min_x, min_y = float("inf"), float("inf")
     max_x, max_y = float("-inf"), float("-inf")
@@ -237,17 +257,30 @@ def load_svg(
             s.color_id = default_id
 
     session.strokes = strokes
-    session.svg_min_x = min_x
-    session.svg_min_y = min_y
-    session.svg_max_x = max_x
-    session.svg_max_y = max_y
 
-    # Si el SVG no declaró width/height nativos, usamos las del bounding
-    # box convertido desde unidades SVG (asumiendo 96 DPI).
+    # El sistema de coordenadas del SVG es el viewBox (si está declarado),
+    # NO el bounding box de los trazos. Así respetamos los márgenes que
+    # el artista dejó intencionalmente en el lienzo.
+    if viewbox_width > 0 and viewbox_height > 0:
+        session.svg_min_x = viewbox_min_x
+        session.svg_min_y = viewbox_min_y
+        session.svg_max_x = viewbox_min_x + viewbox_width
+        session.svg_max_y = viewbox_min_y + viewbox_height
+    else:
+        # Fallback: sin viewBox, usamos el bounding box de los trazos
+        session.svg_min_x = min_x
+        session.svg_min_y = min_y
+        session.svg_max_x = max_x
+        session.svg_max_y = max_y
+
+    # Si el SVG no declaró width/height nativos, deducirlos del viewBox
+    # asumiendo 96 DPI estándar.
     if session.svg_native_width_inches <= 0:
-        session.svg_native_width_inches = (max_x - min_x) / SVG_USER_UNITS_PER_INCH
+        ref_w = viewbox_width if viewbox_width > 0 else (max_x - min_x)
+        session.svg_native_width_inches = ref_w / SVG_USER_UNITS_PER_INCH
     if session.svg_native_height_inches <= 0:
-        session.svg_native_height_inches = (max_y - min_y) / SVG_USER_UNITS_PER_INCH
+        ref_h = viewbox_height if viewbox_height > 0 else (max_y - min_y)
+        session.svg_native_height_inches = ref_h / SVG_USER_UNITS_PER_INCH
 
     # Subdivisión post-bounding-box: usamos un ratio del ancho del SVG
     # para que segmentos muy largos se troceen sin depender de escala.

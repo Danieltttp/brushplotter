@@ -85,16 +85,42 @@ class CanvasView(QGraphicsView):
         )
         self._canvas_rect.setZValue(-10)
 
+        # Etiquetas de orientación física del plotter
+        from PySide6.QtWidgets import QGraphicsSimpleTextItem
+        from PySide6.QtGui import QFont
+        font = QFont("Menlo", 9)
+        # Home en esquina sup. izq.
+        home_label = QGraphicsSimpleTextItem("⌂ Home (0,0)")
+        home_label.setFont(font)
+        home_label.setBrush(QColor(120, 120, 120))
+        home_label.setPos(2, -14)
+        self._scene.addItem(home_label)
+        # Eje X (lado largo del plotter)
+        x_label = QGraphicsSimpleTextItem(f"X — {inches_to_mm(session.canvas.plotter_max_x)/10:.0f} cm →")
+        x_label.setFont(font)
+        x_label.setBrush(QColor(120, 120, 120))
+        x_label.setPos(plotter_w_mm - 80, -14)
+        self._scene.addItem(x_label)
+        # Eje Y (lado corto)
+        y_label = QGraphicsSimpleTextItem(f"↓ Y — {inches_to_mm(session.canvas.plotter_max_y)/10:.0f} cm")
+        y_label.setFont(font)
+        y_label.setBrush(QColor(120, 120, 120))
+        y_label.setPos(-50, plotter_h_mm / 2)
+        self._scene.addItem(y_label)
+
         # 2. Rectángulo del área de dibujo (dentro del plotter)
+        # Considera la rotación: si está rotado 90°, el dibujo en pantalla
+        # ocupa el alto donde antes estaba el ancho y viceversa.
         dx = inches_to_mm(session.canvas.start_x)
         dy = inches_to_mm(session.canvas.start_y)
-        dw = inches_to_mm(session.canvas.drawing_width)
-        dh = inches_to_mm(session.physical_height)
+        if session.canvas.rotation_degrees == 90:
+            dw = inches_to_mm(session.physical_height)
+            dh = inches_to_mm(session.physical_width)
+        else:
+            dw = inches_to_mm(session.physical_width)
+            dh = inches_to_mm(session.physical_height)
         drawing_rect = self._scene.addRect(
-            dx,
-            dy,
-            dw,
-            dh,
+            dx, dy, dw, dh,
             QPen(QColor(180, 180, 200), 0.5, Qt.PenStyle.DashLine),
             QBrush(QColor(255, 255, 255)),
         )

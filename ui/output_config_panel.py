@@ -366,17 +366,33 @@ class OutputConfigPanel(QWidget):
     # Cálculos
     # ----------------------------------------------------------
     def _current_bed_dimensions_inches(self) -> tuple[float, float]:
-        """Devuelve (ancho, alto) en pulgadas según plotter + orientación."""
+        """Devuelve (ancho, alto) en pulgadas SIEMPRE en orientación
+        física del plotter (X = lado largo).
+
+        La cama del plotter no rota: tiene una orientación física fija.
+        Lo que rota es el dibujo dentro de ella (ver _current_rotation).
+        """
         from ..hardware.plotter_models import get_model
         key = self.plotter_combo.currentData()
         if not key:
             return (34.02, 23.39)
         model = get_model(key)
-        # El "default" del modelo está en orientación apaisada (X mayor que Y).
-        # Si el usuario eligió vertical, intercambiamos.
-        if self.btn_landscape.isChecked():
-            return (model.max_x_inches, model.max_y_inches)
-        return (model.max_y_inches, model.max_x_inches)
+        return (model.max_x_inches, model.max_y_inches)
+
+    def _current_rotation(self) -> int:
+        """Devuelve la rotación a aplicar al dibujo (0 o 90)."""
+        return 90 if self.btn_portrait.isChecked() else 0
+
+    def _current_drawing_dimensions_inches(self) -> tuple[float, float]:
+        """Dimensiones físicas del dibujo después de escala y rotación."""
+        if self._session is None:
+            return (0.0, 0.0)
+        scale = self.scale_spin.value() / 100.0
+        w = self._session.svg_native_width_inches * scale
+        h = self._session.svg_native_height_inches * scale
+        if self._current_rotation() == 90:
+            return (h, w)
+        return (w, h)
 
     def _update_bed_size_label(self):
         bw, bh = self._current_bed_dimensions_inches()
@@ -397,9 +413,16 @@ class OutputConfigPanel(QWidget):
         assert self._session is not None
         bed_w, bed_h = self._current_bed_dimensions_inches()
         scale = self.scale_spin.value() / 100.0
+        # Si está rotado 90°, las dimensiones del dibujo se intercambian
+        if self._current_rotation() == 90:
+            svg_w = self._session.svg_native_height_inches
+            svg_h = self._session.svg_native_width_inches
+        else:
+            svg_w = self._session.svg_native_width_inches
+            svg_h = self._session.svg_native_height_inches
         return compute_layout(
-            svg_width_inches=self._session.svg_native_width_inches,
-            svg_height_inches=self._session.svg_native_height_inches,
+            svg_width_inches=svg_w,
+            svg_height_inches=svg_h,
             bed_width_inches=bed_w,
             bed_height_inches=bed_h,
             scale=scale,
@@ -437,5 +460,6 @@ class OutputConfigPanel(QWidget):
         self._session.canvas.drawing_width = result.width_inches
         self._session.canvas.scale_factor = result.scale_used
         self._session.canvas.centered = self.center_check.isChecked()
+        self._session.canvas.rotation_degrees = self._current_rotation()
 
         self.layout_changed.emit()
