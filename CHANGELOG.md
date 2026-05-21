@@ -1,48 +1,56 @@
 # Changelog
 
-## [0.0.7] — 2026-05-21  (preferencias persistentes)
+## [0.0.8] — 2026-05-21  (empaquetado para distribución macOS)
 
 ### Añadido
-- **Módulo `core/preferences.py`**: wrapper tipado sobre `QSettings`.
-  Persistencia de todos los ajustes del usuario entre sesiones.
-- **Lo que se guarda automáticamente** (sin que tengas que pulsar
-  "Guardar"):
-  - Modelo de plotter seleccionado.
-  - Material activo (Acuarela / Acrílico / Tinta).
-  - Velocidad y distancia de recarga (en cm).
-  - Posiciones de tinteros (GLOBALES, por nombre del color).
-  - Posición de la estación de agua (global).
-  - Estado de los dos checkboxes de agua.
-  - Geometría de la ventana principal (tamaño + posición).
-  - Última carpeta usada en "Abrir SVG".
-- **`apply_calibration_to_session`**: cuando cargas un SVG, si algún
-  color coincide en nombre con uno calibrado previamente, recupera
-  su posición automáticamente. Una vez calibras tu setup físico,
-  queda recordado para siempre.
-- **Menú "Preferencias > Restablecer preferencias…"**: borra todos los
-  ajustes guardados con confirmación previa. Útil si algo se corrompe
-  o quieres empezar limpio.
-- **10 nuevos tests** del módulo de preferencias (defaults, roundtrip
-  de escalares, upsert/recuperación de tinteros, ciclo del agua,
-  aplicación a sesión, reset). Total: 58 verde.
+- **`brushplotter.spec`**: configuración de PyInstaller para generar el
+  bundle `.app` de macOS con:
+  - Bundle identifier `com.danielgarciaandujar.brushplotter`.
+  - Versión, copyright, NSHumanReadableCopyright.
+  - Tipo de documento asociado: SVG.
+  - `Info.plist` con declaración de uso de Apple Events y `LSMinimumSystemVersion`.
+  - Hidden imports declarados: PySide6.QtCore/QtGui/QtWidgets, svgpathtools,
+    vpype, shapely, nextdraw.
+  - Exclusiones: módulos pesados de PySide6 que no usamos
+    (QtNetwork, QtWebEngineCore, QtMultimedia, etc.) para reducir tamaño.
+- **`scripts/build_macos.sh`**: script de build automatizado. Limpia,
+  compila, opcionalmente genera DMG distribuible.
+- **`scripts/make_icns.sh`**: convierte un PNG 1024×1024 en un `.icns`
+  multi-resolución usando las herramientas nativas (`sips`, `iconutil`).
+- **`resources/brushplotter.svg` y `.png`**: icono base sobrio del
+  proyecto (pincelada azul + tierra sobre lienzo, gota de agua).
+  Reemplazable por uno propio.
+- **`docs/PACKAGING_MACOS.md`**: guía completa de empaquetado y
+  distribución, incluyendo:
+  - Build sin firma de Apple Developer (con instrucciones para el usuario
+    final de "click derecho → Abrir").
+  - Build con firma (codesign + notarización) para usuarios con cuenta.
+  - Troubleshooting de problemas comunes (ModuleNotFoundError, bundle
+    enorme, permisos USB, app dañada por xattr).
+  - Tabla de tamaños aproximados.
 
-### Ubicación de las preferencias
-- **macOS**: `~/Library/Preferences/com.danielgarciaandujar.brushplotter.plist`
-- **Linux**: `~/.config/Daniel García Andújar/brushplotter.conf`
-- **Windows**: registro bajo `HKEY_CURRENT_USER\Software\...`
+### Cómo construir tu .app
+```bash
+source .venv/bin/activate
+bash scripts/build_macos.sh --dmg
+# Genera dist/brushplotter.app + dist/brushplotter-0.0.8.dmg
+```
 
-### Por hacer (v0.0.8)
-- Empaquetado .app/.icns para macOS con py2app o briefcase.
-- Bundle identifier, icono, permisos USB/serial.
+### Tamaño del bundle resultante
+~240 MB (.app), ~150 MB (.dmg comprimido). Normal para PySide6 + vpype.
+
+## [0.0.7] — 2026-05-21
+- Preferencias persistentes (QSettings) — plotter, material, calibración,
+  ventana, última carpeta. 58 tests verdes.
 
 ## [0.0.6.4] — 2026-05-21
-- Botón de configurar agua en fila propia, garantiza visibilidad.
+- Botón de configurar agua en fila propia.
 
 ## [0.0.6.3] — 2026-05-21
 - Replicar layout del item de tintero en estación de agua.
 
 ## [0.0.6.2] — 2026-05-21
-- Fix botón agua, "+ Añadir tintero" conectado, material se aplica al session.
+- Fix botón agua, "+ Añadir tintero", material aplica al session.
 
 ## [0.0.6.1] — 2026-05-21
 - Dos rituales de agua independientes (rápido y profundo).

@@ -194,25 +194,54 @@ class WaterStationItem(QFrame):
 
         # ── Fila final: botones de acción anchos ──
         # Los ponemos en fila propia para garantizar visibilidad
-        # incluso en sidebars muy estrechos.
+        # incluso en sidebars muy estrechos. Forzamos colores legibles
+        # en modo claro y oscuro (el fondo del item es azul claro fijo,
+        # así que el texto va siempre en azul oscuro).
         buttons_row = QHBoxLayout()
         buttons_row.setSpacing(6)
+
+        # Estilo común para todos los botones del item de agua: fondo
+        # blanco, texto azul oscuro, hover azul claro. Independiente
+        # del tema del sistema.
+        common_btn_style = (
+            "QPushButton { "
+            "  background-color: #ffffff; "
+            "  color: #1a4a78; "
+            "  border: 1px solid #5b9bd5; "
+            "  border-radius: 4px; "
+            "  padding: 5px 10px; "
+            "  font-size: 11px; "
+            "} "
+            "QPushButton:hover { background-color: #e6f0fa; } "
+            "QPushButton:pressed { background-color: #d4e6f7; } "
+        )
 
         if water.is_calibrated:
             btn_goto = QPushButton("⌖ Ir")
             btn_goto.setToolTip("Mover el cabezal a la estación de agua")
+            btn_goto.setStyleSheet(common_btn_style)
             btn_goto.clicked.connect(self.goto_requested.emit)
             buttons_row.addWidget(btn_goto)
 
-        # Botón de configurar/editar SIEMPRE visible. Texto explícito
-        # cuando no está calibrada para guiar al usuario.
+        # Botón de configurar/editar SIEMPRE visible. Cuando no está
+        # calibrada, fondo amarillo de aviso para llamar la atención.
         if water.is_calibrated:
             btn_edit = QPushButton("✎ Editar posición")
+            btn_edit.setStyleSheet(common_btn_style)
         else:
             btn_edit = QPushButton("✎ Configurar posición")
             btn_edit.setStyleSheet(
-                "QPushButton { background: #fff8e1; color: #c47600; "
-                "font-weight: 500; }"
+                "QPushButton { "
+                "  background-color: #fff3cd; "
+                "  color: #856404; "
+                "  border: 1px solid #c47600; "
+                "  border-radius: 4px; "
+                "  padding: 5px 10px; "
+                "  font-size: 11px; "
+                "  font-weight: 500; "
+                "} "
+                "QPushButton:hover { background-color: #ffe9a3; } "
+                "QPushButton:pressed { background-color: #ffd966; } "
             )
         btn_edit.clicked.connect(self.edit_requested.emit)
         buttons_row.addWidget(btn_edit, stretch=1)

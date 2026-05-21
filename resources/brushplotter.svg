@@ -1,0 +1,51 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+Icono base de brushplotter.
+
+Concepto: una pincelada azul-acuarela cruzando el lienzo del plotter,
+sugiriendo el gesto que la app traduce. Sobrio, sin marca corporativa.
+
+Para usar como icono de la app .app:
+  1. Conviértelo a PNG 1024×1024 (Inkscape, ImageMagick o macOS Preview).
+  2. Pásalo por scripts/make_icns.sh para generar el .icns multi-resolución.
+
+Si prefieres diseñar tu propio icono, simplemente reemplaza este archivo
+manteniendo el nombre o ajusta la ruta en brushplotter.spec.
+-->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" width="1024" height="1024">
+  <!-- Fondo neutro, ligeramente cálido -->
+  <rect width="1024" height="1024" fill="#f5f3ef" rx="200" ry="200"/>
+
+  <!-- Lienzo del plotter (rectángulo discreto al fondo) -->
+  <rect x="180" y="280" width="664" height="464"
+        fill="#ffffff"
+        stroke="#cccac4"
+        stroke-width="3"
+        stroke-dasharray="12,8"
+        rx="8" ry="8"/>
+
+  <!-- Marca de Home en esquina superior izquierda del lienzo -->
+  <circle cx="200" cy="300" r="6" fill="#888780"/>
+
+  <!-- Pincelada principal: trazo curvo en acuarela azul, con variación
+       de grosor para evocar la presión del pincel -->
+  <path d="M 240 580 Q 380 380, 540 470 T 820 420"
+        fill="none"
+        stroke="#185FA5"
+        stroke-width="42"
+        stroke-linecap="round"
+        opacity="0.85"/>
+
+  <!-- Segunda pincelada en tierra, más fina -->
+  <path d="M 280 660 Q 460 600, 660 640 T 800 600"
+        fill="none"
+        stroke="#993C1D"
+        stroke-width="22"
+        stroke-linecap="round"
+        opacity="0.7"/>
+
+  <!-- Gota de agua en la esquina superior derecha (representa la
+       estación de agua del proceso) -->
+  <circle cx="850" cy="200" r="38" fill="#5b9bd5" opacity="0.5"/>
+  <circle cx="850" cy="200" r="38" fill="none" stroke="#5b9bd5" stroke-width="3"/>
+</svg>
