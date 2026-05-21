@@ -146,6 +146,27 @@ class CanvasView(QGraphicsView):
             marker.setZValue(-5)
             marker.setToolTip(f"Tintero: {color.name}")
 
+        # 3b. Estación de agua (círculo azul claro, mayor que tinteros)
+        if session.water_station.is_calibrated:
+            wp = session.water_station.position
+            wx = inches_to_mm(wp.x)
+            wy = inches_to_mm(wp.y)
+            wr = 6.0  # más grande que un tintero (un vaso de agua)
+            water_color = QColor("#5b9bd5")
+            water_marker = self._scene.addEllipse(
+                wx - wr, wy - wr, wr * 2, wr * 2,
+                QPen(water_color, 1.2),
+                QBrush(QColor(water_color.red(), water_color.green(), water_color.blue(), 60)),
+            )
+            water_marker.setZValue(-5)
+            water_marker.setToolTip("Estación de agua")
+            # Etiqueta "💧" centrada
+            from PySide6.QtWidgets import QGraphicsSimpleTextItem
+            water_label = QGraphicsSimpleTextItem("💧")
+            water_label.setPos(wx - 4, wy - 8)
+            water_label.setZValue(-4)
+            self._scene.addItem(water_label)
+
         # 4. Los trazos
         for stroke in session.strokes:
             item = self._make_stroke_item(stroke, session)

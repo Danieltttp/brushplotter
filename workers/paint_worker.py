@@ -104,6 +104,8 @@ class PaintWorker(QObject):
     stroke_finished = Signal(int)
     dip_started = Signal(str)
     dip_finished = Signal()
+    water_dip_started = Signal()
+    water_dip_finished = Signal()
     position_changed = Signal(float, float)
     progress_changed = Signal(float)
     color_change_requested = Signal(str, str)
@@ -190,6 +192,18 @@ class PaintWorker(QObject):
                     from_color=old,
                     to_color=stroke.color_id,
                 )
+
+                # Limpieza profunda en agua si está configurado y hay
+                # color previo (no se limpia al empezar la sesión).
+                material = self.session.material_profile
+                water = self.session.water_station
+                if (
+                    old is not None
+                    and material.uses_water_on_color_change
+                    and water.is_calibrated
+                ):
+                    self._deep_water_ritual(water.position, material)
+
                 self.color_change_requested.emit(old or "", stroke.color_id)
                 self._color_change_acknowledged = False
                 while not self._color_change_acknowledged:
@@ -252,7 +266,11 @@ class PaintWorker(QObject):
         self.controller.pen_up()
 
     def _dip_at_current_color(self, resume_at: Point):
-        """Ritual de recarga en el tintero del color activo."""
+        """Ritual de recarga en el tintero del color activo.
+
+        Si el material usa agua y hay estación de agua calibrada, primero
+        limpia/humedece en el agua y luego carga pintura.
+        """
         color = self.session.colors[self._current_color_id]
         if not color.is_calibrated:
             self.error.emit(
@@ -260,6 +278,15 @@ class PaintWorker(QObject):
             )
             raise RuntimeError(f"Tintero no calibrado: {color.name}")
 
+        # 1. Paso por agua si está configurado (limpieza rápida antes de
+        # recargar el mismo color, para no contaminar el tintero con
+        # restos de pintura seca)
+        material = self.session.material_profile
+        water = self.session.water_station
+        if material.uses_water_before_dip and water.is_calibrated:
+            self._water_ritual(water.position, material)
+
+        # 2. Carga de pintura (como siempre)
         self.dip_started.emit(self._current_color_id)
         self.session.log_event("dip", color_id=self._current_color_id)
 
@@ -290,6 +317,78 @@ class PaintWorker(QObject):
         self.controller.move_to(resume_at)
         self._distance_drawn = 0.0
         self.dip_finished.emit()
+
+    def _water_ritual(self, water_pos: Point, material):
+        """Limpia/humedece el pincel en la estación de agua.
+
+        Ritual RÁPIDO: se ejecuta antes de cada recarga del MISMO color.
+        Pasada breve para humedecer cerdas y eliminar restos.
+        """
+        self.water_dip_started.emit()
+        self.session.log_event("water_dip")
+
+        self.controller.pen_up()
+        self.controller.move_to(water_pos)
+        self.controller.pen_down()
+        time.sleep(material.water_dwell_seconds)
+
+        # Stirring cruzado
+        r = material.water_stirring_radius_inches
+        self.controller.line_to(Point(water_pos.x + r, water_pos.y))
+        self.controller.line_to(Point(water_pos.x - r, water_pos.y))
+        self.controller.line_to(Point(water_pos.x, water_pos.y))
+        self.controller.line_to(Point(water_pos.x, water_pos.y + r))
+        self.controller.line_to(Point(water_pos.x, water_pos.y - r))
+        self.controller.line_to(Point(water_pos.x, water_pos.y))
+
+        # Bobbing
+        for _ in range(material.water_bob_count):
+            self.controller.pen_up()
+            time.sleep(0.1)
+            self.controller.pen_down()
+            time.sleep(0.15)
+
+        self.controller.pen_up()
+        self.water_dip_finished.emit()
+
+    def _deep_water_ritual(self, water_pos: Point, material):
+        """Limpieza PROFUNDA en agua para cambio de color.
+
+        Se ejecuta al cambiar de un color a otro distinto, para eliminar
+        bien los restos del color anterior y no contaminar el siguiente
+        tintero. Más enérgico, más largo, e incluye una pausa "secado al
+        aire" antes de continuar.
+        """
+        self.water_dip_started.emit()
+        self.session.log_event("deep_water_dip")
+
+        self.controller.pen_up()
+        self.controller.move_to(water_pos)
+        self.controller.pen_down()
+        time.sleep(material.deep_water_dwell_seconds)
+
+        # Stirring cruzado repetido (más pasadas para limpiar a fondo)
+        r = material.water_stirring_radius_inches
+        for _ in range(material.deep_water_stirring_passes):
+            self.controller.line_to(Point(water_pos.x + r, water_pos.y))
+            self.controller.line_to(Point(water_pos.x - r, water_pos.y))
+            self.controller.line_to(Point(water_pos.x, water_pos.y + r))
+            self.controller.line_to(Point(water_pos.x, water_pos.y - r))
+            self.controller.line_to(Point(water_pos.x, water_pos.y))
+
+        # Bobbing reforzado (sacude más gotas)
+        for _ in range(material.deep_water_bob_count):
+            self.controller.pen_up()
+            time.sleep(0.1)
+            self.controller.pen_down()
+            time.sleep(0.15)
+
+        # Secado al aire: subir el pincel y mantenerlo en alto para
+        # que escurra antes de ir al nuevo color
+        self.controller.pen_up()
+        time.sleep(material.deep_water_air_dry_seconds)
+
+        self.water_dip_finished.emit()
 
     def _check_stop(self) -> bool:
         if self._command == WorkerCommand.STOP:

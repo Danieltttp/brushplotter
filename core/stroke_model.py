@@ -36,6 +36,23 @@ class Point:
 
 
 @dataclass
+class WaterStation:
+    """Estación de agua para limpiar/humedecer el pincel.
+
+    Compartida por todos los colores en una sesión (un único vaso de
+    agua junto al plotter, como en un setup real). La posición es
+    opcional: si es None, no hay agua calibrada y el ritual de agua
+    se omite aunque uses_water esté activado.
+    """
+    position: Optional[Point] = None
+    name: str = "Agua"
+
+    @property
+    def is_calibrated(self) -> bool:
+        return self.position is not None
+
+
+@dataclass
 class InkColor:
     """Un color asignable a trazos, vinculado a una posición de tintero.
 
@@ -99,6 +116,20 @@ class MaterialProfile:
     dip_dwell_seconds: float = 0.3
     dip_stirring_enabled: bool = True
     dip_bob_count: int = 1
+    # Estación de agua (v0.0.6):
+    # Dos flags independientes para los dos momentos en que puede pasar
+    # por agua (recarga vs. cambio de color):
+    uses_water_before_dip: bool = False        # limpieza rápida antes de cada recarga
+    uses_water_on_color_change: bool = False   # limpieza profunda al cambiar de color
+    # Parámetros del ritual rápido (antes de cada recarga)
+    water_dwell_seconds: float = 0.4
+    water_stirring_radius_inches: float = 0.06   # ~1.5 mm
+    water_bob_count: int = 2
+    # Parámetros del ritual profundo (al cambiar de color)
+    deep_water_dwell_seconds: float = 1.0
+    deep_water_stirring_passes: int = 2     # cuántas veces repite el patrón cruzado
+    deep_water_bob_count: int = 4
+    deep_water_air_dry_seconds: float = 1.5  # pausa en alto tras limpieza, para escurrir
 
 
 DEFAULT_PROFILES = {
@@ -107,20 +138,26 @@ DEFAULT_PROFILES = {
         speed_pendown=5,
         max_draw_distance_inches=4.0,
         dip_dwell_seconds=0.5,
+        uses_water_before_dip=True,         # acuarela necesita agua siempre
+        uses_water_on_color_change=True,    # y limpieza profunda al cambiar
     ),
     "acrilico_diluido": MaterialProfile(
         name="Acrílico diluido",
         speed_pendown=4,
-        pen_pos_down=35,  # Más presión, el acrílico es más viscoso
+        pen_pos_down=35,
         max_draw_distance_inches=3.0,
         dip_dwell_seconds=0.8,
         dip_bob_count=2,
+        uses_water_before_dip=False,
+        uses_water_on_color_change=False,
     ),
     "tinta_china": MaterialProfile(
         name="Tinta china",
         speed_pendown=8,
         max_draw_distance_inches=8.0,
         dip_dwell_seconds=0.2,
+        uses_water_before_dip=False,
+        uses_water_on_color_change=False,
     ),
 }
 
@@ -161,6 +198,9 @@ class PaintingSession:
         default_factory=lambda: DEFAULT_PROFILES["acuarela"]
     )
     canvas: CanvasGeometry = field(default_factory=CanvasGeometry)
+
+    # Estación de agua compartida por todos los colores (v0.0.6)
+    water_station: WaterStation = field(default_factory=WaterStation)
 
     # Bounding box del SVG (calculado al cargar)
     svg_min_x: float = 0.0

@@ -180,6 +180,20 @@ class ManualControlDialog(QDialog):
         btn_dip_test.clicked.connect(self.on_dip_test)
         right_col.addWidget(btn_dip_test)
 
+        # Estación de agua
+        right_col.addSpacing(8)
+        right_col.addWidget(self._section_label("ESTACIÓN DE AGUA"))
+        btn_goto_water = QPushButton("💧  Ir a estación de agua")
+        btn_goto_water.clicked.connect(self.on_go_to_water)
+        right_col.addWidget(btn_goto_water)
+        btn_water_test = QPushButton("🌊  Probar ritual de agua")
+        btn_water_test.setToolTip(
+            "Reproduce el movimiento de limpieza en agua (dip + stir + "
+            "bobbing). IMPORTANTE: usar sin pincel cargado."
+        )
+        btn_water_test.clicked.connect(self.on_water_test)
+        right_col.addWidget(btn_water_test)
+
         right_col.addSpacing(12)
         right_col.addWidget(self._section_label("MOTORES"))
         motors_row = QHBoxLayout()
@@ -384,6 +398,46 @@ class ManualControlDialog(QDialog):
         if ret != QMessageBox.StandardButton.Yes:
             return
         self._worker.dip_test(color.inkwell_position)
+
+    @Slot()
+    def on_go_to_water(self):
+        if not self._connected or not self._session:
+            return
+        water = self._session.water_station
+        if not water.is_calibrated:
+            QMessageBox.warning(
+                self,
+                "Sin posición",
+                "La estación de agua no está calibrada. Configúrala "
+                "desde el panel principal (botón ✎ junto a 💧).",
+            )
+            return
+        self._worker.go_to(water.position.x, water.position.y)
+
+    @Slot()
+    def on_water_test(self):
+        if not self._connected or not self._session:
+            return
+        water = self._session.water_station
+        if not water.is_calibrated:
+            QMessageBox.warning(
+                self,
+                "Sin posición",
+                "La estación de agua no está calibrada.",
+            )
+            return
+        ret = QMessageBox.question(
+            self,
+            "Probar ritual de agua",
+            "Se ejecutará el movimiento de limpieza en agua.\n\n"
+            "Asegúrate de que el portaherramientas NO tiene pincel cargado.\n\n"
+            "¿Continuar?",
+        )
+        if ret != QMessageBox.StandardButton.Yes:
+            return
+        # Usamos el mismo dip_test del worker pero con un radio más grande
+        # típico de una estación de agua
+        self._worker.dip_test(water.position, stirring_radius=0.06)
 
     @Slot()
     def on_pen_up(self):

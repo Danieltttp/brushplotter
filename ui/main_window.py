@@ -217,6 +217,14 @@ class MainWindow(QMainWindow):
         # Panel de tinteros
         self.inkwell_panel = InkwellPanel()
         self.inkwell_panel.edit_requested.connect(self.on_edit_inkwell)
+        self.inkwell_panel.edit_water_requested.connect(self.on_edit_water)
+        self.inkwell_panel.add_requested.connect(self.on_add_inkwell)
+        self.inkwell_panel.toggle_water_before_dip.connect(
+            self.on_toggle_water_before_dip
+        )
+        self.inkwell_panel.toggle_water_on_color_change.connect(
+            self.on_toggle_water_on_color_change
+        )
         material_layout.addWidget(self.inkwell_panel)
         material_layout.addStretch()
 
@@ -316,6 +324,12 @@ class MainWindow(QMainWindow):
             return
 
         self._session = session
+
+        # Aplicar el material actualmente seleccionado en el combo
+        from dataclasses import replace
+        material_key = self.material_combo.currentData()
+        if material_key and material_key in DEFAULT_PROFILES:
+            session.material_profile = replace(DEFAULT_PROFILES[material_key])
 
         # Conectar el panel de salida (calcula layout y aplica al session)
         self.output_panel.set_session(session)
@@ -423,10 +437,11 @@ class MainWindow(QMainWindow):
             )
             return
 
-        # Aplicar parámetros del UI a la sesión
+        # Refinar el material_profile con los controles del UI.
+        # NO reasignamos el perfil completo desde DEFAULT_PROFILES porque
+        # el usuario puede haber tocado los checkboxes del agua, y se
+        # perderían sus cambios.
         from ..core.units import cm_to_inches
-        material_key = self.material_combo.currentData()
-        self._session.material_profile = DEFAULT_PROFILES[material_key]
         # El spinner está en cm — convertir a pulgadas
         self._session.material_profile.max_draw_distance_inches = (
             cm_to_inches(self.recharge_spin.value())
@@ -450,6 +465,7 @@ class MainWindow(QMainWindow):
         self._worker.position_changed.connect(self.canvas_view.update_head_position)
         self._worker.progress_changed.connect(self.on_progress)
         self._worker.dip_started.connect(self.on_dip_started)
+        self._worker.water_dip_started.connect(self.on_water_dip_started)
         self._worker.color_change_requested.connect(self.on_color_change)
         self._worker.finished.connect(self.on_worker_finished)
         self._worker.error.connect(self.on_worker_error)
@@ -494,6 +510,19 @@ class MainWindow(QMainWindow):
         if self._session and color_id in self._session.colors:
             name = self._session.colors[color_id].name
             self._append_log(f"Recarga · {name}")
+
+    @Slot()
+    def on_water_dip_started(self):
+        # Si el último evento del session log es deep_water_dip, mostramos
+        # un mensaje específico; si no, es ritual rápido.
+        if (
+            self._session
+            and self._session.event_log
+            and self._session.event_log[-1].get("type") == "deep_water_dip"
+        ):
+            self._append_log("🌊 Limpieza profunda en agua")
+        else:
+            self._append_log("💧 Paso por agua")
 
     @Slot(str, str)
     def on_color_change(self, old_id: str, new_id: str):
@@ -551,13 +580,100 @@ class MainWindow(QMainWindow):
             self._append_log(f"Tintero editado: {new_color.name}")
 
     @Slot()
+    def on_add_inkwell(self):
+        """Añadir un nuevo tintero a la sesión.
+
+        Si no hay sesión cargada, no hacer nada (no tiene sentido un
+        tintero sin SVG). Si hay sesión, crear un tintero placeholder
+        y abrir directamente el diálogo de edición.
+        """
+        if self._session is None:
+            QMessageBox.information(
+                self,
+                "Sin SVG cargado",
+                "Carga un SVG primero. Los tinteros se asocian a una sesión "
+                "y a los colores que aparecen en el dibujo.",
+            )
+            return
+
+        from .inkwell_edit_dialog import InkwellEditDialog
+        from ..core.stroke_model import InkColor
+        # Crear un id único: tintero_N donde N no colisione
+        n = 1
+        while f"tintero_{n}" in self._session.colors:
+            n += 1
+        new_id = f"tintero_{n}"
+        placeholder = InkColor(name=f"Tintero {n}", hex="#888888")
+
+        dlg = InkwellEditDialog(placeholder, self)
+        if dlg.exec() == dlg.DialogCode.Accepted:
+            new_color = dlg.build_color()
+            self._session.colors[new_id] = new_color
+            self.inkwell_panel.set_session(self._session)
+            self.canvas_view.load_session(self._session)
+            self._append_log(f"Tintero añadido: {new_color.name}")
+
+    @Slot()
+    def on_edit_water(self):
+        if self._session is None:
+            return
+        from .water_station_edit_dialog import WaterStationEditDialog
+        dlg = WaterStationEditDialog(self._session.water_station, self)
+        if dlg.exec() == dlg.DialogCode.Accepted:
+            self._session.water_station = dlg.build_water_station()
+            self.inkwell_panel.set_session(self._session)
+            self.canvas_view.load_session(self._session)
+            self._append_log("Estación de agua configurada")
+
+    @Slot(bool)
+    def on_toggle_water_before_dip(self, enabled: bool):
+        if self._session is None:
+            return
+        self._session.material_profile.uses_water_before_dip = enabled
+        self._append_log(
+            f"Agua antes de recargar: {'activada' if enabled else 'desactivada'}"
+        )
+
+    @Slot(bool)
+    def on_toggle_water_on_color_change(self, enabled: bool):
+        if self._session is None:
+            return
+        self._session.material_profile.uses_water_on_color_change = enabled
+        self._append_log(
+            f"Agua al cambiar color: {'activada' if enabled else 'desactivada'}"
+        )
+
+    @Slot()
     def on_material_changed(self):
+        """Aplica el perfil del material seleccionado a la sesión activa.
+
+        Esto cambia: distancia de recarga, velocidad, posiciones del
+        pincel, y los dos flags de uso de agua (lo cual refresca los
+        checkboxes del panel de agua).
+        """
         key = self.material_combo.currentData()
-        if key and key in DEFAULT_PROFILES:
-            from ..core.units import inches_to_cm
-            profile = DEFAULT_PROFILES[key]
-            self.recharge_spin.setValue(inches_to_cm(profile.max_draw_distance_inches))
-            self.speed_slider.setValue(profile.speed_pendown)
+        if not key or key not in DEFAULT_PROFILES:
+            return
+
+        from ..core.units import inches_to_cm
+        # Tomamos una COPIA del perfil para no mutar el diccionario global
+        from dataclasses import replace
+        new_profile = replace(DEFAULT_PROFILES[key])
+
+        # Actualizar los controles del panel
+        self.recharge_spin.setValue(inches_to_cm(new_profile.max_draw_distance_inches))
+        self.speed_slider.setValue(new_profile.speed_pendown)
+
+        # Aplicar al session si hay uno cargado
+        if self._session is not None:
+            # Preservar la water_station ya configurada (no la pisamos al
+            # cambiar de material — su posición sigue siendo la misma
+            # físicamente, lo que cambia es si la usamos o no)
+            self._session.material_profile = new_profile
+            # Refrescar el panel de tinteros para que los checkboxes
+            # reflejen los flags del nuevo material
+            self.inkwell_panel.set_session(self._session)
+            self._append_log(f"Material: {new_profile.name}")
 
     @Slot()
     def on_layout_changed(self):
