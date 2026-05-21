@@ -1,42 +1,57 @@
 # Changelog
 
-## [0.0.6.2] — 2026-05-20  (bugfixes UI agua/material/tinteros)
+## [0.0.7] — 2026-05-21  (preferencias persistentes)
 
-### Corregido
-- **Bug del botón ✎ de la estación de agua no visible**: el item se ha
-  rediseñado con layout vertical más claro: cabecera con ✎ siempre
-  visible (no condicionada a estar calibrada), coordenadas o aviso
-  "⚠ Sin posición — pulsa ✎ para configurar" debajo, y dos checkboxes
-  abajo. Ahora siempre hay un camino visible para configurar la
-  posición.
-- **"+ Añadir tintero" no hacía nada**: la señal `add_requested` del
-  panel no estaba conectada. Ahora abre el diálogo de edición con un
-  tintero placeholder (color gris, nombre "Tintero N") que el usuario
-  puede personalizar y guardar.
-- **El selector de Material no cambiaba el comportamiento**: ahora
-  cambiar el desplegable aplica el perfil completo al session
-  (incluidos `uses_water_before_dip` y `uses_water_on_color_change`),
-  y refresca los checkboxes del panel de agua. Antes solo actualizaba
-  el spinner de recarga y el slider de velocidad.
-- **Mutación accidental del perfil global**: `on_start` reasignaba el
-  perfil desde `DEFAULT_PROFILES` (referencia compartida), lo cual
-  machacaba los cambios del usuario en los checkboxes Y contaminaba
-  el diccionario global. Ahora se usan copias (`dataclasses.replace`).
-- Al cargar SVG, el perfil del material actualmente seleccionado en
-  el combo se aplica a la nueva sesión (antes siempre se quedaba en
-  acuarela aunque tuvieras seleccionado otro material).
+### Añadido
+- **Módulo `core/preferences.py`**: wrapper tipado sobre `QSettings`.
+  Persistencia de todos los ajustes del usuario entre sesiones.
+- **Lo que se guarda automáticamente** (sin que tengas que pulsar
+  "Guardar"):
+  - Modelo de plotter seleccionado.
+  - Material activo (Acuarela / Acrílico / Tinta).
+  - Velocidad y distancia de recarga (en cm).
+  - Posiciones de tinteros (GLOBALES, por nombre del color).
+  - Posición de la estación de agua (global).
+  - Estado de los dos checkboxes de agua.
+  - Geometría de la ventana principal (tamaño + posición).
+  - Última carpeta usada en "Abrir SVG".
+- **`apply_calibration_to_session`**: cuando cargas un SVG, si algún
+  color coincide en nombre con uno calibrado previamente, recupera
+  su posición automáticamente. Una vez calibras tu setup físico,
+  queda recordado para siempre.
+- **Menú "Preferencias > Restablecer preferencias…"**: borra todos los
+  ajustes guardados con confirmación previa. Útil si algo se corrompe
+  o quieres empezar limpio.
+- **10 nuevos tests** del módulo de preferencias (defaults, roundtrip
+  de escalares, upsert/recuperación de tinteros, ciclo del agua,
+  aplicación a sesión, reset). Total: 58 verde.
 
-### Por hacer (v0.0.7)
-- Preferencias persistentes (QSettings).
+### Ubicación de las preferencias
+- **macOS**: `~/Library/Preferences/com.danielgarciaandujar.brushplotter.plist`
+- **Linux**: `~/.config/Daniel García Andújar/brushplotter.conf`
+- **Windows**: registro bajo `HKEY_CURRENT_USER\Software\...`
 
-## [0.0.6.1] — 2026-05-20
+### Por hacer (v0.0.8)
+- Empaquetado .app/.icns para macOS con py2app o briefcase.
+- Bundle identifier, icono, permisos USB/serial.
+
+## [0.0.6.4] — 2026-05-21
+- Botón de configurar agua en fila propia, garantiza visibilidad.
+
+## [0.0.6.3] — 2026-05-21
+- Replicar layout del item de tintero en estación de agua.
+
+## [0.0.6.2] — 2026-05-21
+- Fix botón agua, "+ Añadir tintero" conectado, material se aplica al session.
+
+## [0.0.6.1] — 2026-05-21
 - Dos rituales de agua independientes (rápido y profundo).
 
-## [0.0.6] — 2026-05-20
+## [0.0.6] — 2026-05-21
 - Estación de agua compartida con ritual de limpieza.
 
 ## [0.0.5.1] — 2026-05-20
-- Proyección por viewBox; rotación del dibujo; etiquetas físicas.
+- Proyección por viewBox; rotación del dibujo.
 
 ## [0.0.5] — 2026-05-20
 - Panel de configuración de salida con escala, encaje, orientación.

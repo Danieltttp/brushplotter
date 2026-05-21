@@ -38,6 +38,7 @@ from ..core.stroke_model import (
     DEFAULT_PROFILES,
     PaintingSession,
 )
+from ..core.preferences import apply_calibration_to_session, get_preferences
 from ..core.svg_loader import load_svg
 from ..hardware.controller import PlotterController
 from ..hardware.simulator import SimulatedController
@@ -78,13 +79,42 @@ class MainWindow(QMainWindow):
         self._worker: PaintWorker | None = None
         self._worker_thread: QThread | None = None
         self._session_start_time: float | None = None
+        self._prefs = get_preferences()
 
         self.setWindowTitle("brushplotter")
         self.resize(1280, 800)
 
         self._build_ui()
         self._build_menus()
+        self._restore_preferences()
         self._update_state_indicators()
+
+    def _restore_preferences(self):
+        """Aplica las preferencias guardadas al estado inicial del UI."""
+        # Geometría de ventana
+        geom = self._prefs.get_window_geometry()
+        if geom is not None:
+            self.restoreGeometry(geom)
+
+        # Material por defecto (con flags de agua del usuario)
+        material_key = self._prefs.get_material_key()
+        idx = self.material_combo.findData(material_key)
+        if idx >= 0:
+            # Bloqueamos señales para no disparar on_material_changed
+            # antes de tener los demás controles listos.
+            self.material_combo.blockSignals(True)
+            self.material_combo.setCurrentIndex(idx)
+            self.material_combo.blockSignals(False)
+
+        # Recarga y velocidad
+        self.recharge_spin.blockSignals(True)
+        self.recharge_spin.setValue(self._prefs.get_recharge_cm())
+        self.recharge_spin.blockSignals(False)
+
+        self.speed_slider.blockSignals(True)
+        self.speed_slider.setValue(self._prefs.get_speed_pendown())
+        self.speed_slider.blockSignals(False)
+        self._update_speed_label(self.speed_slider.value())
 
     # ----------------------------------------------------------
     # Construcción de la UI
@@ -201,6 +231,7 @@ class MainWindow(QMainWindow):
         self.recharge_spin.setSingleStep(0.5)
         self.recharge_spin.setSuffix(" cm")
         self.recharge_spin.setValue(12.7)  # 5 pulgadas
+        self.recharge_spin.valueChanged.connect(self.on_recharge_changed)
         recharge_row.addWidget(self.recharge_spin)
         material_layout.addLayout(recharge_row)
 
@@ -209,6 +240,7 @@ class MainWindow(QMainWindow):
         self.speed_slider.setRange(1, 20)
         self.speed_slider.setValue(5)
         self.speed_slider.valueChanged.connect(self._update_speed_label)
+        self.speed_slider.valueChanged.connect(self.on_speed_changed)
         material_layout.addWidget(self.speed_slider)
         self.speed_label = QLabel("Lenta · 5%")
         self.speed_label.setStyleSheet("font-size: 11px; color: #888;")
@@ -303,20 +335,55 @@ class MainWindow(QMainWindow):
 
         plotter_menu = menubar.addMenu("Plotter")
         plotter_menu.addAction(self.action_calibrate)
+        plotter_menu.addAction(self.action_manual)
+
+        prefs_menu = menubar.addMenu("Preferencias")
+        reset_action = QAction("Restablecer preferencias…", self)
+        reset_action.triggered.connect(self.on_reset_preferences)
+        prefs_menu.addAction(reset_action)
+
+    @Slot()
+    def on_reset_preferences(self):
+        ret = QMessageBox.question(
+            self,
+            "Restablecer preferencias",
+            "Esto borrará todas las preferencias guardadas:\n\n"
+            "• Plotter y material\n"
+            "• Posiciones de tinteros y agua\n"
+            "• Velocidad y recarga\n"
+            "• Geometría de la ventana\n\n"
+            "Los cambios se aplicarán la próxima vez que abras la app.\n\n"
+            "¿Continuar?",
+        )
+        if ret == QMessageBox.StandardButton.Yes:
+            self._prefs.reset_all()
+            self._append_log("Preferencias restablecidas. Reinicia la app.")
+            QMessageBox.information(
+                self,
+                "Preferencias restablecidas",
+                "Cierra y vuelve a abrir la app para ver el efecto.",
+            )
 
     # ----------------------------------------------------------
     # Slots
     # ----------------------------------------------------------
     @Slot()
     def on_open_svg(self):
+        # Recordar última carpeta usada
+        last_dir = self._prefs.get_last_svg_dir()
         path_str, _ = QFileDialog.getOpenFileName(
             self,
             "Abrir SVG",
-            "",
+            last_dir,
             "SVG (*.svg)",
         )
         if not path_str:
             return
+
+        # Guardar la carpeta para la próxima vez
+        from pathlib import Path
+        self._prefs.set_last_svg_dir(str(Path(path_str).parent))
+
         try:
             session = load_svg(path_str)
         except Exception as e:
@@ -330,6 +397,9 @@ class MainWindow(QMainWindow):
         material_key = self.material_combo.currentData()
         if material_key and material_key in DEFAULT_PROFILES:
             session.material_profile = replace(DEFAULT_PROFILES[material_key])
+
+        # Aplicar calibración guardada (tinteros, agua, flags)
+        applied = apply_calibration_to_session(session, self._prefs)
 
         # Conectar el panel de salida (calcula layout y aplica al session)
         self.output_panel.set_session(session)
@@ -348,6 +418,10 @@ class MainWindow(QMainWindow):
         self.progress_label.setText("0%")
         self.action_start.setEnabled(True)
         self._append_log(f"SVG cargado: {Path(path_str).name}")
+        if applied > 0:
+            self._append_log(
+                f"Calibración recuperada para {applied} color(es)"
+            )
 
     @Slot()
     def on_calibrate(self):
@@ -575,6 +649,8 @@ class MainWindow(QMainWindow):
         if dlg.exec() == dlg.DialogCode.Accepted:
             new_color = dlg.build_color()
             self._session.colors[color_id] = new_color
+            # Persistir GLOBALMENTE por nombre
+            self._prefs.upsert_inkwell(new_color.name, new_color)
             self.inkwell_panel.set_session(self._session)
             self.canvas_view.load_session(self._session)
             self._append_log(f"Tintero editado: {new_color.name}")
@@ -598,7 +674,6 @@ class MainWindow(QMainWindow):
 
         from .inkwell_edit_dialog import InkwellEditDialog
         from ..core.stroke_model import InkColor
-        # Crear un id único: tintero_N donde N no colisione
         n = 1
         while f"tintero_{n}" in self._session.colors:
             n += 1
@@ -609,6 +684,8 @@ class MainWindow(QMainWindow):
         if dlg.exec() == dlg.DialogCode.Accepted:
             new_color = dlg.build_color()
             self._session.colors[new_id] = new_color
+            # Persistir globalmente
+            self._prefs.upsert_inkwell(new_color.name, new_color)
             self.inkwell_panel.set_session(self._session)
             self.canvas_view.load_session(self._session)
             self._append_log(f"Tintero añadido: {new_color.name}")
@@ -621,12 +698,15 @@ class MainWindow(QMainWindow):
         dlg = WaterStationEditDialog(self._session.water_station, self)
         if dlg.exec() == dlg.DialogCode.Accepted:
             self._session.water_station = dlg.build_water_station()
+            # Persistir
+            self._prefs.set_water_station(self._session.water_station)
             self.inkwell_panel.set_session(self._session)
             self.canvas_view.load_session(self._session)
             self._append_log("Estación de agua configurada")
 
     @Slot(bool)
     def on_toggle_water_before_dip(self, enabled: bool):
+        self._prefs.set_uses_water_before_dip(enabled)
         if self._session is None:
             return
         self._session.material_profile.uses_water_before_dip = enabled
@@ -636,6 +716,7 @@ class MainWindow(QMainWindow):
 
     @Slot(bool)
     def on_toggle_water_on_color_change(self, enabled: bool):
+        self._prefs.set_uses_water_on_color_change(enabled)
         if self._session is None:
             return
         self._session.material_profile.uses_water_on_color_change = enabled
@@ -650,30 +731,56 @@ class MainWindow(QMainWindow):
         Esto cambia: distancia de recarga, velocidad, posiciones del
         pincel, y los dos flags de uso de agua (lo cual refresca los
         checkboxes del panel de agua).
+
+        Guarda el material elegido en preferencias.
         """
         key = self.material_combo.currentData()
         if not key or key not in DEFAULT_PROFILES:
             return
 
         from ..core.units import inches_to_cm
-        # Tomamos una COPIA del perfil para no mutar el diccionario global
         from dataclasses import replace
         new_profile = replace(DEFAULT_PROFILES[key])
 
-        # Actualizar los controles del panel
+        # Persistir elección
+        self._prefs.set_material_key(key)
+        self._prefs.set_uses_water_before_dip(new_profile.uses_water_before_dip)
+        self._prefs.set_uses_water_on_color_change(
+            new_profile.uses_water_on_color_change
+        )
+
+        # Actualizar los controles del panel (sin disparar señales)
+        self.recharge_spin.blockSignals(True)
         self.recharge_spin.setValue(inches_to_cm(new_profile.max_draw_distance_inches))
+        self.recharge_spin.blockSignals(False)
+        self._prefs.set_recharge_cm(self.recharge_spin.value())
+
+        self.speed_slider.blockSignals(True)
         self.speed_slider.setValue(new_profile.speed_pendown)
+        self.speed_slider.blockSignals(False)
+        self._update_speed_label(self.speed_slider.value())
+        self._prefs.set_speed_pendown(new_profile.speed_pendown)
 
         # Aplicar al session si hay uno cargado
         if self._session is not None:
-            # Preservar la water_station ya configurada (no la pisamos al
-            # cambiar de material — su posición sigue siendo la misma
-            # físicamente, lo que cambia es si la usamos o no)
             self._session.material_profile = new_profile
-            # Refrescar el panel de tinteros para que los checkboxes
-            # reflejen los flags del nuevo material
             self.inkwell_panel.set_session(self._session)
             self._append_log(f"Material: {new_profile.name}")
+
+    @Slot(float)
+    def on_recharge_changed(self, value: float):
+        self._prefs.set_recharge_cm(value)
+        if self._session is not None:
+            from ..core.units import cm_to_inches
+            self._session.material_profile.max_draw_distance_inches = (
+                cm_to_inches(value)
+            )
+
+    @Slot(int)
+    def on_speed_changed(self, value: int):
+        self._prefs.set_speed_pendown(value)
+        if self._session is not None:
+            self._session.material_profile.speed_pendown = value
 
     @Slot()
     def on_layout_changed(self):
@@ -714,6 +821,10 @@ class MainWindow(QMainWindow):
         pass  # placeholder para indicadores futuros
 
     def closeEvent(self, event):
+        # Guardar geometría de ventana
+        self._prefs.set_window_geometry(self.saveGeometry())
+        self._prefs.sync()
+
         if self._worker:
             self._worker.request_stop()
             self._cleanup_worker()

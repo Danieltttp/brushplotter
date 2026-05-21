@@ -91,6 +91,17 @@ class OutputConfigPanel(QWidget):
         self._build_ui()
         self._connect_signals()
 
+        # Aplicar plotter de preferencias como default
+        from ..core.preferences import get_preferences
+        self._prefs = get_preferences()
+        saved_plotter = self._prefs.get_plotter_model()
+        idx = self.plotter_combo.findData(saved_plotter)
+        if idx >= 0:
+            self.plotter_combo.blockSignals(True)
+            self.plotter_combo.setCurrentIndex(idx)
+            self.plotter_combo.blockSignals(False)
+            self._update_bed_size_label()
+
     # ----------------------------------------------------------
     # Construcción
     # ----------------------------------------------------------
@@ -306,8 +317,10 @@ class OutputConfigPanel(QWidget):
     def _on_plotter_changed(self):
         if self._updating:
             return
-        # Cambiar al papel sugerido para ese plotter
+        # Persistir elección
         plotter_key = self.plotter_combo.currentData()
+        if plotter_key:
+            self._prefs.set_plotter_model(plotter_key)
         self._update_bed_size_label()
         self._recompute_and_emit()
 
